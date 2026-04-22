@@ -1,0 +1,92 @@
+{
+  "entities": {
+    "Shift": {
+      "title": "Shift",
+      "description": "A nursing shift record",
+      "type": "object",
+      "properties": {
+        "patientName": { "type": "string", "description": "Name of the patient" },
+        "healthInsurance": { "type": "string", "description": "Convênio" },
+        "patientDob": { "type": "string", "format": "date", "description": "Patient Date of Birth" },
+        "patientGender": { "type": "string", "enum": ["M", "F", "Outro"], "description": "Patient Gender" },
+        "patientResponsible": { "type": "string", "description": "Patient Responsible Person" },
+        "techName": { "type": "string", "description": "Nursing Technician Name" },
+        "techCoren": { "type": "string", "description": "COREN ID" },
+        "nfsNumber": { "type": "string", "description": "NFS-e Number" },
+        "competence": { "type": "string", "description": "Service Competence (YYYY-MM)" },
+        "shiftCount": { "type": "number", "description": "Quantity of 12h shifts" },
+        "shiftValue": { "type": "number", "description": "Value per shift" },
+        "bankPix": { "type": "string", "description": "PIX Key" },
+        "bankName": { "type": "string", "description": "Bank Name" },
+        "bankAccount": { "type": "string", "description": "Bank Account" },
+        "bankAgency": { "type": "string", "description": "Bank Agency" },
+        "totalValue": { "type": "number", "description": "Total value (shiftCount * shiftValue)" },
+        "responsiblePhone": { "type": "string", "description": "Phone of the patient responsible" },
+        "techWhatsapp": { "type": "string", "description": "WhatsApp of the technician" },
+        "isConfirmed": { "type": "boolean", "description": "Whether the shift has been confirmed by the manager" },
+        "createdBy": { "type": "string", "description": "UID of the user who created the record" },
+        "createdAt": { "type": "string", "format": "date-time", "description": "Creation timestamp" }
+      },
+      "required": [
+        "patientName",
+        "healthInsurance",
+        "patientDob",
+        "patientGender",
+        "patientResponsible",
+        "techName",
+        "techCoren",
+        "nfsNumber",
+        "competence",
+        "shiftCount",
+        "shiftValue",
+        "bankPix",
+        "bankName",
+        "bankAccount",
+        "bankAgency",
+        "totalValue",
+        "responsiblePhone",
+        "techWhatsapp",
+        "createdBy",
+        "createdAt"
+      ]
+    },
+    "Settings": {
+      "title": "Settings",
+      "description": "System settings",
+      "type": "object",
+      "properties": {
+        "logoUrl": { "type": "string", "description": "URL for the system logo" }
+      }
+    },
+    "UserProfile": {
+      "title": "User Profile",
+      "description": "Stored technician data for auto-fill",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string" },
+        "email": { "type": "string" },
+        "displayName": { "type": "string" },
+        "role": { "type": "string", "enum": ["admin", "tech"] },
+        "techName": { "type": "string" },
+        "techCoren": { "type": "string" },
+        "techWhatsapp": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["uid", "email", "role"]
+    }
+  },
+  "firestore": {
+    "/shifts/{shiftId}": {
+      "schema": "Shift",
+      "description": "Collection of nursing shift records"
+    },
+    "/settings/{settingId}": {
+      "schema": "Settings",
+      "description": "System settings collection"
+    },
+    "/users/{userId}": {
+      "schema": "UserProfile",
+      "description": "User profiles for auto-fill"
+    }
+  }
+}

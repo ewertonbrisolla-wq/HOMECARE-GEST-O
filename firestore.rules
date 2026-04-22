@@ -1,0 +1,120 @@
+// ===============================================================
+// Assumed Data Model
+// ===============================================================
+//
+// Collection: shifts
+// Document ID: auto-generated
+// Fields:
+//   - patientName: string (required)
+//   - healthInsurance: string (required)
+//   - patientDob: string (required, date format)
+//   - patientGender: string (required, enum)
+//   - patientResponsible: string (required)
+//   - techName: string (required)
+//   - techCoren: string (required)
+//   - nfsNumber: string (required)
+//   - competence: string (required, YYYY-MM)
+//   - shiftCount: number (required, positive)
+//   - shiftValue: number (required, positive)
+//   - bankPix: string (required)
+//   - bankAccount: string (required)
+//   - bankAgency: string (required)
+//   - totalValue: number (required)
+//   - createdBy: string (required, auth.uid)
+//   - createdAt: timestamp (required)
+//
+// ===============================================================
+
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // ===============================================================
+    // Helper Functions
+    // ===============================================================
+    
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    function isOwner(userId) {
+      return isAuthenticated() && request.auth.uid == userId;
+    }
+
+    function isAdmin() {
+      return isAuthenticated() && 
+        (request.auth.token.email == "ewerton.brisolla@gmail.com");
+    }
+
+    // Admin bypass - Allow admin to perform any operation on any document
+    match /{allPaths=**} {
+      allow read, write: if isAdmin();
+    }
+
+    function isValidShift(data) {
+      let requiredFields = [
+        'patientName', 'healthInsurance', 'patientDob', 'patientGender', 
+        'patientResponsible', 'techName', 'techCoren', 
+        'competence', 'shiftCount', 'shiftValue', 'bankPix', 'bankName',
+        'bankAccount', 'bankAgency', 'totalValue', 'responsiblePhone', 
+        'techWhatsapp', 'isConfirmed', 'createdBy', 'createdAt'
+      ];
+      return data.keys().hasAll(requiredFields) &&
+      (!('nfsNumber' in data) || (data.nfsNumber is string && data.nfsNumber.size() < 50)) &&
+      data.patientName is string && data.patientName.size() > 0 && data.patientName.size() < 200 &&
+      data.healthInsurance is string && data.healthInsurance.size() > 0 && data.healthInsurance.size() < 100 &&
+      data.patientDob is string &&
+      data.patientGender in ['M', 'F', 'Outro'] &&
+      data.patientResponsible is string && data.patientResponsible.size() > 0 && data.patientResponsible.size() < 200 &&
+      data.techName is string && data.techName.size() > 0 && data.techName.size() < 200 &&
+      data.techCoren is string && data.techCoren.size() > 0 && data.techCoren.size() < 50 &&
+      data.competence is string && data.competence.matches('^\\d{4}-\\d{2}$') &&
+      data.shiftCount is number && data.shiftCount > 0 && data.shiftCount <= 62 &&
+      data.shiftValue is number && data.shiftValue >= 0 &&
+      data.bankPix is string && data.bankPix.size() > 0 && data.bankPix.size() < 100 &&
+      data.bankName is string && data.bankName.size() > 0 && data.bankName.size() < 100 &&
+      data.bankAccount is string && data.bankAccount.size() > 0 && data.bankAccount.size() < 50 &&
+      data.bankAgency is string && data.bankAgency.size() > 0 && data.bankAgency.size() < 50 &&
+      data.responsiblePhone is string && data.responsiblePhone.size() > 0 && data.responsiblePhone.size() < 50 &&
+      data.techWhatsapp is string && data.techWhatsapp.size() > 0 && data.techWhatsapp.size() < 50 &&
+      data.isConfirmed is bool &&
+      data.totalValue is number &&
+      data.createdAt is timestamp;
+    }
+
+    function isValidUser(data) {
+      return data.keys().hasAll(['uid', 'email', 'displayName', 'role', 'createdAt']) &&
+             data.uid == request.auth.uid &&
+             data.email == request.auth.token.email &&
+             data.role in ['admin', 'tech'];
+    }
+
+    match /shifts/{shiftId} {
+      allow read: if isAuthenticated() && (isOwner(resource.data.createdBy) || isAdmin());
+      allow create: if isAuthenticated() && isValidShift(request.resource.data) && 
+                    request.resource.data.createdBy == request.auth.uid &&
+                    request.resource.data.isConfirmed == false;
+      allow update: if isAuthenticated() && (
+        (isAdmin() && isValidShift(request.resource.data) && request.resource.data.createdBy == resource.data.createdBy) || 
+        (isOwner(resource.data.createdBy) && resource.data.isConfirmed == false && isValidShift(request.resource.data) && 
+         request.resource.data.isConfirmed == false && request.resource.data.createdBy == request.auth.uid)
+      );
+      allow delete: if isAuthenticated() && isAdmin();
+    }
+
+    match /settings/{settingId} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+
+    match /users/{userId} {
+      allow read: if isAuthenticated();
+      allow create, update: if isOwner(userId) && isValidUser(request.resource.data);
+    }
+
+    match /patients/{patientId} {
+      allow read: if isAuthenticated();
+      allow create, update, delete: if isAdmin();
+    }
+  }
+}
