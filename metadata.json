@@ -2,5 +2,7 @@
   "name": "AUDIMED SAÚDE HOMECARE - GESTÃO",
   "description": "Sistema para inclusão, organização e conferência de plantões de enfermagem AUDIMED SAÚDE.",
   "requestFramePermissions": [],
-  "majorCapabilities": []
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
 }

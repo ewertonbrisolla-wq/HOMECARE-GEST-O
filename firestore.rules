@@ -68,7 +68,7 @@ service cloud.firestore {
       data.patientResponsible is string && data.patientResponsible.size() > 0 && data.patientResponsible.size() < 200 &&
       data.techName is string && data.techName.size() > 0 && data.techName.size() < 200 &&
       data.techCoren is string && data.techCoren.size() > 0 && data.techCoren.size() < 50 &&
-      data.competence is string && data.competence.matches('^\\d{4}-\\d{2}$') &&
+      data.competence is string && data.competence.matches('^\\d{4}-\\d{2}(-F[12])?$') &&
       data.shiftCount is number && data.shiftCount > 0 && data.shiftCount <= 62 &&
       data.shiftValue is number && data.shiftValue >= 0 &&
       data.bankPix is string && data.bankPix.size() > 0 && data.bankPix.size() < 100 &&

@@ -5,6 +5,7 @@ export interface Shift {
   patientDob: string;
   patientGender: 'M' | 'F' | 'Outro';
   patientResponsible: string;
+  profession?: string;
   techName: string;
   techCoren: string;
   nfsNumber: string;
@@ -21,6 +22,10 @@ export interface Shift {
   mealAllowanceValue?: number;
   responsiblePhone: string;
   techWhatsapp: string;
+  sadtFileUrl?: string; // Legacy field for SADT file
+  sadtFileUrls?: string[]; // Multiple SADT files
+  nfsFileUrl?: string;  // Legacy field for NFS-e file
+  nfsFileUrls?: string[];  // Multiple NFS-e files
   isConfirmed: boolean;
   createdBy: string;
   createdAt: any;
@@ -41,6 +46,7 @@ export interface Patient {
 
 export interface Settings {
   logoUrl?: string;
+  appIconUrl?: string;
   menuTitle1?: string;
   menuTitle2?: string;
   helpText?: string;

@@ -1,18 +1,61 @@
-import React, { useEffect, useState } from 'react';
-import { db, auth, handleFirestoreError, OperationType } from '../firebase';
-import { collection, query, onSnapshot, orderBy, where, doc, updateDoc, deleteDoc } from 'firebase/firestore';
-import { Shift, MonthSummary, PatientSummary } from '../types';
-import { getShiftLimit, formatCurrency, formatMonth } from '../lib/shift-logic';
-import { maskPhone } from '../lib/utils';
-import { Card, CardContent, CardHeader, CardTitle } from './ui/card';
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from './ui/table';
-import { Badge } from './ui/badge';
-import { AlertCircle, Printer, ChevronDown, ChevronRight, Edit2, Trash2, MessageCircle, User as UserIcon, Phone, Calendar, Heart, ShieldCheck, CheckCircle2, Clock, Loader2, History, ClipboardList } from 'lucide-react';
-import { Button } from './ui/button';
-import { Input } from './ui/input';
-import { toast } from 'sonner';
-import { ShiftForm } from './ShiftForm';
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from './ui/dialog';
+import React, { useEffect, useState } from "react";
+import { db, auth, handleFirestoreError, OperationType } from "../firebase";
+import {
+  collection,
+  query,
+  onSnapshot,
+  orderBy,
+  where,
+  doc,
+  updateDoc,
+  deleteDoc,
+} from "firebase/firestore";
+import { Shift, MonthSummary, PatientSummary } from "../types";
+import { getShiftLimit, formatCurrency, formatMonth } from "../lib/shift-logic";
+import { maskPhone, openFile } from "../lib/utils";
+import { Card, CardContent, CardHeader, CardTitle } from "./ui/card";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "./ui/table";
+import { Badge } from "./ui/badge";
+import {
+  AlertCircle,
+  Printer,
+  ChevronDown,
+  ChevronRight,
+  Edit2,
+  Trash2,
+  MessageCircle,
+  User as UserIcon,
+  Phone,
+  Calendar,
+  Heart,
+  ShieldCheck,
+  CheckCircle2,
+  Clock,
+  Loader2,
+  History,
+  ClipboardList,
+  Search,
+  FileText,
+  Eye,
+} from "lucide-react";
+import { Button } from "./ui/button";
+import { Input } from "./ui/input";
+import { toast } from "sonner";
+import { ShiftForm } from "./ShiftForm";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+} from "./ui/dialog";
 
 interface ShiftListProps {
   shifts: Shift[];
@@ -24,21 +67,55 @@ export function ShiftList({ shifts, isAdmin: propIsAdmin }: ShiftListProps) {
   const [expandedPatients, setExpandedPatients] = useState<string[]>([]);
   const [editingShift, setEditingShift] = useState<Shift | null>(null);
   const [viewingPatient, setViewingPatient] = useState<Shift | null>(null);
-  const [viewingTech, setViewingTech] = useState<{ name: string, month: string } | null>(null);
+  const [viewingTech, setViewingTech] = useState<{
+    name: string;
+    month: string;
+  } | null>(null);
   const [confirmingId, setConfirmingId] = useState<string | null>(null);
   const [showPrintPreview, setShowPrintPreview] = useState(false);
+  const [searchTerm, setSearchTerm] = useState("");
+  const [reportSearchTerm, setReportSearchTerm] = useState("");
   const [printingMonth, setPrintingMonth] = useState<string | null>(null);
-  const [bulkNfs, setBulkNfs] = useState('');
+  const [bulkNfs, setBulkNfs] = useState("");
   const [updatingBulk, setUpdatingBulk] = useState(false);
   const [settings, setSettings] = useState<any>({});
+  const [selectedTechs, setSelectedTechs] = useState<string[]>([]);
 
-  const isAdmin = propIsAdmin ?? (auth.currentUser?.email === "ewerton.brisolla@gmail.com");
+  const availableTechs = React.useMemo(() => {
+    if (!printingMonth) return [];
+    const techsSet = new Set<string>();
+    shifts.forEach((s) => {
+      if (s.competence === printingMonth && s.isConfirmed && s.techName) {
+        techsSet.add(s.techName);
+      }
+    });
+    return Array.from(techsSet).sort((a, b) => a.localeCompare(b));
+  }, [shifts, printingMonth]);
 
   useEffect(() => {
-    const unsubscribe = onSnapshot(doc(db, 'settings', 'system'), (doc) => {
+    if (printingMonth) {
+      const techsSet = new Set<string>();
+      shifts.forEach((s) => {
+        if (s.competence === printingMonth && s.isConfirmed && s.techName) {
+          techsSet.add(s.techName);
+        }
+      });
+      setSelectedTechs(Array.from(techsSet));
+    } else {
+      setSelectedTechs([]);
+    }
+  }, [printingMonth, shifts]);
+
+  const isAdmin =
+    propIsAdmin ?? auth.currentUser?.email === "ewerton.brisolla@gmail.com";
+
+  useEffect(() => {
+    const unsubscribe = onSnapshot(doc(db, "settings", "system"), (doc) => {
       if (doc.exists()) {
         setSettings(doc.data() as any);
       }
+    }, (error) => {
+      handleFirestoreError(error, OperationType.LIST, "settings/system");
     });
     return () => unsubscribe();
   }, []);
@@ -60,62 +137,97 @@ export function ShiftList({ shifts, isAdmin: propIsAdmin }: ShiftListProps) {
     }
   };
 
-  const techShifts = viewingTech 
-    ? shifts.filter(s => s.techName === viewingTech.name && s.competence === viewingTech.month) 
+  const filteredShifts = shifts.filter((shift) => {
+    const searchLow = searchTerm.toLowerCase();
+    const patientName = shift.patientName || "";
+    const techName = shift.techName || "";
+    return (
+      patientName.toLowerCase().includes(searchLow) ||
+      techName.toLowerCase().includes(searchLow)
+    );
+  });
+
+  const techShifts = viewingTech
+    ? shifts.filter(
+        (s) =>
+          s.techName === viewingTech.name && s.competence === viewingTech.month,
+      )
     : [];
-  const techInfo = techShifts[0] || (viewingTech ? shifts.find(s => s.techName === viewingTech.name) : null);
+  const techInfo =
+    techShifts[0] ||
+    (viewingTech ? shifts.find((s) => s.techName === viewingTech.name) : null);
 
-  const organizedData: Record<string, MonthSummary> = shifts.reduce((acc, shift) => {
-    const month = shift.competence;
-    if (!acc[month]) {
-      acc[month] = { competence: month, patients: {} };
-    }
+  const organizedData: Record<string, MonthSummary> = filteredShifts.reduce(
+    (acc, shift) => {
+      const month = shift.competence;
+      if (!acc[month]) {
+        acc[month] = { competence: month, patients: {} };
+      }
 
-    if (!acc[month].patients[shift.patientName]) {
-      acc[month].patients[shift.patientName] = {
-        patientName: shift.patientName,
-        totalShifts: 0,
-        limitShifts: getShiftLimit(month),
-        isOverLimit: false,
-        shifts: []
-      };
-    }
+      if (!acc[month].patients[shift.patientName]) {
+        acc[month].patients[shift.patientName] = {
+          patientName: shift.patientName,
+          totalShifts: 0,
+          limitShifts: getShiftLimit(month),
+          isOverLimit: false,
+          shifts: [],
+        };
+      }
 
-    acc[month].patients[shift.patientName].shifts.push(shift);
-    acc[month].patients[shift.patientName].totalShifts += shift.shiftCount;
-    acc[month].patients[shift.patientName].isOverLimit = 
-      acc[month].patients[shift.patientName].totalShifts > acc[month].patients[shift.patientName].limitShifts;
+      acc[month].patients[shift.patientName].shifts.push(shift);
 
-    return acc;
-  }, {} as Record<string, MonthSummary>);
+      const isRaimundo =
+        shift.patientName === "RAIMUNDO RODRIGUES DE LIMA FILHO";
+      const isTech = isRaimundo
+        ? shift.profession === "Técnico de enfermagem" || !shift.profession
+        : true;
+
+      if (isTech) {
+        acc[month].patients[shift.patientName].totalShifts += shift.shiftCount;
+      }
+
+      acc[month].patients[shift.patientName].isOverLimit =
+        acc[month].patients[shift.patientName].totalShifts >
+        acc[month].patients[shift.patientName].limitShifts;
+
+      return acc;
+    },
+    {} as Record<string, MonthSummary>,
+  );
 
   const toggleMonth = (month: string) => {
-    setExpandedMonths(prev => prev.includes(month) ? prev.filter(m => m !== month) : [...prev, month]);
+    setExpandedMonths((prev) =>
+      prev.includes(month) ? prev.filter((m) => m !== month) : [...prev, month],
+    );
   };
 
   const togglePatient = (month: string, patient: string) => {
     const key = `${month}-${patient}`;
-    setExpandedPatients(prev => prev.includes(key) ? prev.filter(k => k !== key) : [...prev, key]);
+    setExpandedPatients((prev) =>
+      prev.includes(key) ? prev.filter((k) => k !== key) : [...prev, key],
+    );
   };
 
   const handleBulkUpdate = async () => {
     if (!isAdmin || !viewingTech || !techShifts.length) return;
-    
+
     setUpdatingBulk(true);
     try {
-      const promises = techShifts.map(shift => {
+      const promises = techShifts.map((shift) => {
         if (!shift.id) return Promise.resolve();
         const updateData: any = { isConfirmed: true };
         if (bulkNfs) updateData.nfsNumber = bulkNfs;
-        return updateDoc(doc(db, 'shifts', shift.id), updateData);
+        return updateDoc(doc(db, "shifts", shift.id), updateData);
       });
-      
+
       await Promise.all(promises);
-      toast.success('Todos os lançamentos do técnico foram confirmados e atualizados!');
-      setBulkNfs('');
+      toast.success(
+        "Todos os lançamentos do técnico foram confirmados e atualizados!",
+      );
+      setBulkNfs("");
     } catch (error) {
-      handleFirestoreError(error, OperationType.UPDATE, 'shifts/bulk');
-      toast.error('Erro ao realizar atualização em massa.');
+      handleFirestoreError(error, OperationType.UPDATE, "shifts/bulk");
+      toast.error("Erro ao realizar atualização em massa.");
     } finally {
       setUpdatingBulk(false);
     }
@@ -127,21 +239,24 @@ export function ShiftList({ shifts, isAdmin: propIsAdmin }: ShiftListProps) {
   };
 
   const triggerActualPrint = () => {
-    const printContent = document.getElementById('printable-report');
+    const printContent = document.getElementById("printable-report");
     if (!printContent) return;
 
     // Create a temporary iframe for printing
-    const iframe = document.createElement('iframe');
-    iframe.setAttribute('style', 'position: absolute; width: 0; height: 0; top: 0; left: 0;');
+    const iframe = document.createElement("iframe");
+    iframe.setAttribute(
+      "style",
+      "position: absolute; width: 0; height: 0; top: 0; left: 0;",
+    );
     document.body.appendChild(iframe);
-    
+
     const iframeDoc = iframe.contentWindow?.document;
     if (!iframeDoc) return;
 
     // Copy all styles from the main document to the iframe to ensure identical rendering
     const styles = document.querySelectorAll('style, link[rel="stylesheet"]');
-    let headContent = '';
-    styles.forEach(style => {
+    let headContent = "";
+    styles.forEach((style) => {
       headContent += style.outerHTML;
     });
 
@@ -196,11 +311,14 @@ export function ShiftList({ shifts, isAdmin: propIsAdmin }: ShiftListProps) {
 
   const openWhatsApp = (phone: string) => {
     if (!phone) {
-      toast.error('Número de WhatsApp não informado para este registro.');
+      toast.error("Número de WhatsApp não informado para este registro.");
       return;
     }
-    const cleanPhone = phone.replace(/\D/g, '');
-    window.open(`https://wa.me/${cleanPhone.startsWith('55') ? cleanPhone : '55' + cleanPhone}`, '_blank');
+    const cleanPhone = phone.replace(/\D/g, "");
+    window.open(
+      `https://wa.me/${cleanPhone.startsWith("55") ? cleanPhone : "55" + cleanPhone}`,
+      "_blank",
+    );
   };
 
   const handleToggleConfirm = async (shift: Shift) => {
@@ -208,13 +326,17 @@ export function ShiftList({ shifts, isAdmin: propIsAdmin }: ShiftListProps) {
 
     setConfirmingId(shift.id);
     try {
-      await updateDoc(doc(db, 'shifts', shift.id), {
-        isConfirmed: !(!!shift.isConfirmed)
+      await updateDoc(doc(db, "shifts", shift.id), {
+        isConfirmed: !!!shift.isConfirmed,
       });
-      toast.success(shift.isConfirmed ? 'Confirmação removida.' : 'Lançamento confirmado com sucesso!');
+      toast.success(
+        shift.isConfirmed
+          ? "Confirmação removida."
+          : "Lançamento confirmado com sucesso!",
+      );
     } catch (error) {
-      handleFirestoreError(error, OperationType.UPDATE, 'shifts/' + shift.id);
-      toast.error('Erro ao atualizar status.');
+      handleFirestoreError(error, OperationType.UPDATE, "shifts/" + shift.id);
+      toast.error("Erro ao atualizar status.");
     } finally {
       setConfirmingId(null);
     }
@@ -222,19 +344,28 @@ export function ShiftList({ shifts, isAdmin: propIsAdmin }: ShiftListProps) {
 
   const handleDeleteShift = async (shift: Shift) => {
     if (!isAdmin || !shift.id) return;
-    if (!window.confirm(`Tem certeza que deseja excluir o lançamento do paciente ${shift.patientName}?`)) return;
+    if (
+      !window.confirm(
+        `Tem certeza que deseja excluir o lançamento do paciente ${shift.patientName}?`,
+      )
+    )
+      return;
 
     try {
-      await deleteDoc(doc(db, 'shifts', shift.id));
-      toast.success('Lançamento excluído com sucesso!');
+      await deleteDoc(doc(db, "shifts", shift.id));
+      toast.success("Lançamento excluído com sucesso!");
     } catch (error) {
-      handleFirestoreError(error, OperationType.DELETE, 'shifts/' + shift.id);
-      toast.error('Erro ao excluir lançamento.');
+      handleFirestoreError(error, OperationType.DELETE, "shifts/" + shift.id);
+      toast.error("Erro ao excluir lançamento.");
     }
   };
 
   if (shifts.length === 0) {
-    return <div className="flex justify-center p-8 text-muted-foreground">Nenhum lançamento encontrado.</div>;
+    return (
+      <div className="flex justify-center p-8 text-muted-foreground">
+        Nenhum lançamento encontrado.
+      </div>
+    );
   }
 
   if (shifts.length === 0) {
@@ -249,221 +380,429 @@ export function ShiftList({ shifts, isAdmin: propIsAdmin }: ShiftListProps) {
 
   return (
     <div className="space-y-6 mt-8 no-print">
-      <div className="flex justify-between items-center">
-        <h2 className="text-2xl font-bold text-primary">Atendimentos Organizados</h2>
+      <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
+        <h2 className="text-2xl font-bold text-primary">
+          Atendimentos Organizados
+        </h2>
+        <div className="flex w-full md:w-auto items-center gap-2">
+          <div className="relative flex-1 md:w-64">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+            <Input
+              placeholder="Buscar paciente ou profissional..."
+              className="pl-9 h-10 border-primary/20"
+              value={searchTerm}
+              onChange={(e) => setSearchTerm(e.target.value)}
+            />
+          </div>
+          {searchTerm && (
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => setSearchTerm("")}
+              className="h-10"
+            >
+              Limpar
+            </Button>
+          )}
+        </div>
       </div>
 
-      {Object.values(organizedData).sort((a, b) => b.competence.localeCompare(a.competence)).map(monthData => (
-        <Card key={monthData.competence} className="overflow-hidden border-primary/20">
-          <CardHeader className="bg-primary/5 cursor-pointer" onClick={() => toggleMonth(monthData.competence)}>
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-2">
-                {expandedMonths.includes(monthData.competence) ? <ChevronDown className="text-primary" /> : <ChevronRight className="text-primary" />}
-                <CardTitle className="text-primary">{formatMonth(monthData.competence)}</CardTitle>
-              </div>
-              <div className="flex items-center gap-3">
-                <Button 
-                  size="sm" 
-                  variant="outline" 
-                  className="border-primary text-primary hover:bg-primary/10 h-8 text-xs font-bold"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    handlePrint(monthData.competence);
-                  }}
-                >
-                  <Printer className="mr-2 h-3.5 w-3.5" /> Imprimir Relatório
-                </Button>
-                <Badge variant="outline" className="border-primary text-primary">{Object.keys(monthData.patients).length} Pacientes</Badge>
-              </div>
-            </div>
-          </CardHeader>
-          
-          {expandedMonths.includes(monthData.competence) && (
-            <CardContent className="p-4 space-y-6 bg-muted/30">
-              {Object.values(monthData.patients)
-                .sort((a, b) => a.patientName.localeCompare(b.patientName))
-                .map(patientData => (
-                <Card key={patientData.patientName} className={`border-primary/20 shadow-sm overflow-hidden ${patientData.isOverLimit ? 'ring-2 ring-destructive/50 border-destructive/50' : ''}`}>
-                  <div 
-                    className={`${patientData.isOverLimit ? 'bg-destructive/10' : 'bg-primary/5'} p-3 flex items-center justify-between border-b border-primary/10 transition-colors`}
-                  >
-                    <div className="flex items-center gap-3">
-                      <div className={`${patientData.isOverLimit ? 'bg-destructive/20' : 'bg-primary/10'} p-2 rounded-full`}>
-                        <UserIcon className={`h-4 w-4 ${patientData.isOverLimit ? 'text-destructive' : 'text-primary'}`} />
-                      </div>
-                      <div>
-                        <h3 
-                          className={`font-bold hover:underline cursor-pointer ${patientData.isOverLimit ? 'text-destructive' : 'text-primary'}`}
-                          onClick={() => {
-                            const firstShift = patientData.shifts[0];
-                            if (firstShift) setViewingPatient(firstShift);
-                          }}
-                        >
-                          {patientData.patientName} 
-                          {patientData.shifts[0]?.patientDob && (
-                            <span className="ml-2 text-xs font-normal opacity-70">
-                              ({calculateAge(patientData.shifts[0].patientDob)} anos)
-                            </span>
-                          )}
-                          {patientData.shifts[0]?.healthInsurance && (
-                            <span className="ml-2 text-xs font-bold opacity-70">
-                              - {patientData.shifts[0].healthInsurance}
-                            </span>
-                          )}
-                        </h3>
-                        <p className="text-xs text-muted-foreground">Paciente em Atendimento</p>
-                      </div>
-                    </div>
-                    <div className="flex items-center gap-4">
-                      <div className="text-sm bg-background px-3 py-1 rounded-full border border-primary/10">
-                        Total: <span className={patientData.isOverLimit ? "text-destructive font-bold" : "font-semibold"}>
-                          {patientData.totalShifts} / {patientData.limitShifts} Plantões
-                        </span>
-                      </div>
-                      {patientData.isOverLimit && (
-                        <Badge variant="destructive" className="flex gap-1 animate-pulse">
-                          <AlertCircle className="h-3 w-3" /> Limite Excedido
-                        </Badge>
-                      )}
-                    </div>
-                  </div>
+      {Object.values(organizedData).length === 0 && searchTerm && (
+        <div className="p-12 text-center border-2 border-dashed rounded-xl border-primary/10">
+          <p className="text-muted-foreground">
+            Nenhum resultado encontrado para "{searchTerm}"
+          </p>
+        </div>
+      )}
 
-                  <div className="p-0 overflow-x-auto">
-                    <Table>
-                      <TableHeader className="bg-muted/50">
-                        <TableRow className="border-primary/10">
-                          <TableHead className="font-bold text-primary">Técnico(a)</TableHead>
-                          <TableHead className="font-bold text-primary">Dados Bancários</TableHead>
-                          {isAdmin && <TableHead className="font-bold text-primary">NFS-e</TableHead>}
-                          <TableHead className="font-bold text-primary">Plantões</TableHead>
-                          <TableHead className="font-bold text-primary">Alimentação</TableHead>
-                          <TableHead className="font-bold text-primary">Valor Total</TableHead>
-                          <TableHead className="font-bold text-primary">Status</TableHead>
-                          <TableHead className="text-right font-bold text-primary">Ações</TableHead>
-                        </TableRow>
-                      </TableHeader>
-                      <TableBody>
-                        {patientData.shifts.map(shift => (
-                          <TableRow key={shift.id} className="border-primary/10 hover:bg-primary/5 transition-colors">
-                            <TableCell className="font-medium">
-                              <div className="flex items-center gap-2">
-                                <span 
-                                  className="hover:text-primary hover:underline cursor-pointer font-semibold"
-                                  onClick={() => setViewingTech({ name: shift.techName, month: monthData.competence })}
-                                >
-                                  {shift.techName}
+      {Object.values(organizedData)
+        .sort((a, b) => b.competence.localeCompare(a.competence))
+        .map((monthData) => (
+          <Card
+            key={monthData.competence}
+            className="overflow-hidden border-primary/20"
+          >
+            <CardHeader
+              className="bg-primary/5 cursor-pointer"
+              onClick={() => toggleMonth(monthData.competence)}
+            >
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  {expandedMonths.includes(monthData.competence) ? (
+                    <ChevronDown className="text-primary" />
+                  ) : (
+                    <ChevronRight className="text-primary" />
+                  )}
+                  <CardTitle className="text-primary">
+                    {formatMonth(monthData.competence)}
+                  </CardTitle>
+                </div>
+                <div className="flex items-center gap-3">
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="border-primary text-primary hover:bg-primary/10 h-8 text-xs font-bold"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      handlePrint(monthData.competence);
+                    }}
+                  >
+                    <Printer className="mr-2 h-3.5 w-3.5" /> Imprimir Relatório
+                  </Button>
+                  <Badge
+                    variant="outline"
+                    className="border-primary text-primary"
+                  >
+                    {Object.keys(monthData.patients).length} Pacientes
+                  </Badge>
+                </div>
+              </div>
+            </CardHeader>
+
+            {expandedMonths.includes(monthData.competence) && (
+              <CardContent className="p-4 space-y-6 bg-muted/30">
+                {Object.values(monthData.patients)
+                  .sort((a, b) => a.patientName.localeCompare(b.patientName))
+                  .map((patientData) => (
+                    <Card
+                      key={patientData.patientName}
+                      className={`border-primary/20 shadow-sm overflow-hidden ${patientData.isOverLimit ? "ring-2 ring-destructive/50 border-destructive/50" : ""}`}
+                    >
+                      <div
+                        className={`${patientData.isOverLimit ? "bg-destructive/10" : "bg-primary/5"} p-3 flex items-center justify-between border-b border-primary/10 transition-colors`}
+                      >
+                        <div className="flex items-center gap-3">
+                          <div
+                            className={`${patientData.isOverLimit ? "bg-destructive/20" : "bg-primary/10"} p-2 rounded-full`}
+                          >
+                            <UserIcon
+                              className={`h-4 w-4 ${patientData.isOverLimit ? "text-destructive" : "text-primary"}`}
+                            />
+                          </div>
+                          <div>
+                            <h3
+                              className={`font-bold hover:underline cursor-pointer ${patientData.isOverLimit ? "text-destructive" : "text-primary"}`}
+                              onClick={() => {
+                                const firstShift = patientData.shifts[0];
+                                if (firstShift) setViewingPatient(firstShift);
+                              }}
+                            >
+                              {patientData.patientName}
+                              {patientData.shifts[0]?.patientDob && (
+                                <span className="ml-2 text-xs font-normal opacity-70">
+                                  (
+                                  {calculateAge(
+                                    patientData.shifts[0].patientDob,
+                                  )}{" "}
+                                  anos)
                                 </span>
-                                {shift.techWhatsapp && (
-                                  <Button 
-                                    variant="ghost" 
-                                    size="icon" 
-                                    className="h-6 w-6 text-[#25D366] hover:bg-[#25D366]/10"
-                                    onClick={() => openWhatsApp(shift.techWhatsapp)}
-                                    title="Falar com Técnico(a) no WhatsApp"
-                                  >
-                                    <MessageCircle className="h-4 w-4 fill-current" />
-                                  </Button>
-                                )}
-                              </div>
-                            </TableCell>
-                            <TableCell className="text-[11px] leading-tight">
-                              <div className="flex flex-col">
-                                <span className="font-bold text-primary">{shift.bankName}</span>
-                                <span className="text-sm font-bold text-primary">PIX: {shift.bankPix}</span>
-                                <span>Ag: {shift.bankAgency} / CC: {shift.bankAccount}</span>
-                              </div>
-                            </TableCell>
-                            {isAdmin && <TableCell className="font-medium">{shift.nfsNumber}</TableCell>}
-                            <TableCell className="font-medium">{shift.shiftCount}</TableCell>
-                            <TableCell className="text-xs">
-                              {shift.hasMealAllowance ? (
-                                <div className="flex flex-col">
-                                  <span className="font-bold text-green-600">{formatCurrency((shift.mealAllowanceValue || 0) * shift.shiftCount)}</span>
-                                  <span className="text-[10px] opacity-70">({shift.shiftCount}x {formatCurrency(shift.mealAllowanceValue || 0)})</span>
-                                </div>
-                              ) : (
-                                <span className="text-muted-foreground">-</span>
                               )}
-                            </TableCell>
-                            <TableCell className="font-bold text-primary">{formatCurrency(shift.totalValue)}</TableCell>
-                            <TableCell>
-                              <div className="flex items-center gap-2">
-                                {shift.isConfirmed ? (
-                                  <Badge className="bg-green-500 hover:bg-green-600 flex gap-1 items-center px-2 py-0">
-                                    <CheckCircle2 className="h-3 w-3" /> Confirmado
-                                  </Badge>
-                                ) : (
-                                  <Badge variant="outline" className="text-amber-500 border-amber-500 flex gap-1 items-center px-2 py-0">
-                                    <Clock className="h-3 w-3" /> Pendente
-                                  </Badge>
-                                )}
-                                {isAdmin && (
-                                  <Button
-                                    variant="ghost"
-                                    size="icon"
-                                    className="h-7 w-7 text-primary hover:bg-primary/10"
-                                    onClick={() => handleToggleConfirm(shift)}
-                                    disabled={confirmingId === shift.id}
-                                    title={shift.isConfirmed ? "Remover Confirmação" : "Confirmar Lançamento"}
-                                  >
-                                    {confirmingId === shift.id ? (
-                                      <Loader2 className="h-3 w-3 animate-spin" />
-                                    ) : (
-                                      <ShieldCheck className="h-4 w-4" />
+                              {patientData.shifts[0]?.healthInsurance && (
+                                <span className="ml-2 text-xs font-bold opacity-70">
+                                  - {patientData.shifts[0].healthInsurance}
+                                </span>
+                              )}
+                            </h3>
+                            <p className="text-xs text-muted-foreground">
+                              Paciente em Atendimento
+                            </p>
+                          </div>
+                        </div>
+                        <div className="flex items-center gap-4">
+                          <div className="text-sm bg-background px-3 py-1 rounded-full border border-primary/10">
+                            Total:{" "}
+                            <span
+                              className={
+                                patientData.isOverLimit
+                                  ? "text-destructive font-bold"
+                                  : "font-semibold"
+                              }
+                            >
+                              {patientData.totalShifts} /{" "}
+                              {patientData.limitShifts} Plantões
+                            </span>
+                          </div>
+                          {patientData.isOverLimit && (
+                            <Badge
+                              variant="destructive"
+                              className="flex gap-1 animate-pulse"
+                            >
+                              <AlertCircle className="h-3 w-3" /> Limite
+                              Excedido
+                            </Badge>
+                          )}
+                        </div>
+                      </div>
+
+                      <div className="p-0 overflow-x-auto">
+                        <Table>
+                          <TableHeader className="bg-muted/50">
+                            <TableRow className="border-primary/10">
+                              <TableHead className="font-bold text-primary">
+                                Profissional
+                              </TableHead>
+                              <TableHead className="font-bold text-primary">
+                                Dados Bancários
+                              </TableHead>
+                              {isAdmin && (
+                                <TableHead className="font-bold text-primary">
+                                  NFS-e
+                                </TableHead>
+                              )}
+                              <TableHead className="font-bold text-primary">
+                                Plantões
+                              </TableHead>
+                              <TableHead className="font-bold text-primary">
+                                Alimentação
+                              </TableHead>
+                              <TableHead className="font-bold text-primary">
+                                Anexos
+                              </TableHead>
+                              <TableHead className="font-bold text-primary">
+                                Valor Total
+                              </TableHead>
+                              <TableHead className="font-bold text-primary">
+                                Status
+                              </TableHead>
+                              <TableHead className="text-right font-bold text-primary">
+                                Ações
+                              </TableHead>
+                            </TableRow>
+                          </TableHeader>
+                          <TableBody>
+                            {patientData.shifts.map((shift) => (
+                              <TableRow
+                                key={shift.id}
+                                className="border-primary/10 hover:bg-primary/5 transition-colors"
+                              >
+                                <TableCell className="font-medium">
+                                  <div className="flex items-center gap-2">
+                                    <span
+                                      className="hover:text-primary hover:underline cursor-pointer font-semibold"
+                                      onClick={() =>
+                                        setViewingTech({
+                                          name: shift.techName,
+                                          month: monthData.competence,
+                                        })
+                                      }
+                                    >
+                                      {shift.profession &&
+                                        shift.patientName ===
+                                          "RAIMUNDO RODRIGUES DE LIMA FILHO" && (
+                                          <span className="text-[10px] uppercase font-bold text-muted-foreground block leading-none mb-0.5">
+                                            {shift.profession}
+                                          </span>
+                                        )}
+                                      {shift.techName}
+                                    </span>
+                                    {shift.techWhatsapp && (
+                                      <Button
+                                        variant="ghost"
+                                        size="icon"
+                                        className="h-6 w-6 text-[#25D366] hover:bg-[#25D366]/10"
+                                        onClick={() =>
+                                          openWhatsApp(shift.techWhatsapp)
+                                        }
+                                        title="Falar com Profissional no WhatsApp"
+                                      >
+                                        <MessageCircle className="h-4 w-4 fill-current" />
+                                      </Button>
                                     )}
-                                  </Button>
-                                )}
-                              </div>
-                            </TableCell>
-                            <TableCell className="text-right">
-                              <div className="flex justify-end gap-1">
-                                <Button 
-                                  variant="ghost" 
-                                  size="icon" 
-                                  onClick={() => setViewingPatient(shift)}
-                                  className="h-8 w-8 text-primary hover:bg-primary/10"
-                                  title="Ver Detalhes do Paciente"
-                                >
-                                  <UserIcon className="h-4 w-4" />
-                                </Button>
-                                <Button 
-                                  variant="ghost" 
-                                  size="icon" 
-                                  onClick={() => setEditingShift(shift)}
-                                  className="h-8 w-8 text-primary hover:bg-primary/10"
-                                  title={shift.isConfirmed && !isAdmin ? "Visualizar Lançamento" : "Editar Lançamento"}
-                                >
-                                  <Edit2 className="h-4 w-4" />
-                                </Button>
+                                  </div>
+                                </TableCell>
+                                <TableCell className="text-[11px] leading-tight">
+                                  <div className="flex flex-col">
+                                    <span className="font-bold text-primary">
+                                      {shift.bankName}
+                                    </span>
+                                    <span className="text-sm font-bold text-primary">
+                                      PIX: {shift.bankPix}
+                                    </span>
+                                    <span>
+                                      Ag: {shift.bankAgency} / CC:{" "}
+                                      {shift.bankAccount}
+                                    </span>
+                                  </div>
+                                </TableCell>
                                 {isAdmin && (
-                                  <Button 
-                                    variant="ghost" 
-                                    size="icon" 
-                                    onClick={() => handleDeleteShift(shift)}
-                                    className="h-8 w-8 text-destructive hover:bg-destructive/10"
-                                    title="Excluir Lançamento"
-                                  >
-                                    <Trash2 className="h-4 w-4" />
-                                  </Button>
+                                  <TableCell className="font-medium">
+                                    {shift.nfsNumber}
+                                  </TableCell>
                                 )}
-                              </div>
-                            </TableCell>
-                          </TableRow>
-                        ))}
-                      </TableBody>
-                    </Table>
-                  </div>
-                </Card>
-              ))}
-            </CardContent>
-          )}
-        </Card>
-      ))}
+                                <TableCell className="font-medium">
+                                  {shift.shiftCount}
+                                </TableCell>
+                                <TableCell className="text-xs">
+                                  {shift.hasMealAllowance ? (
+                                    <div className="flex flex-col">
+                                      <span className="font-bold text-green-600">
+                                        {formatCurrency(
+                                          (shift.mealAllowanceValue || 0) *
+                                            shift.shiftCount,
+                                        )}
+                                      </span>
+                                      <span className="text-[10px] opacity-70">
+                                        ({shift.shiftCount}x{" "}
+                                        {formatCurrency(
+                                          shift.mealAllowanceValue || 0,
+                                        )}
+                                        )
+                                      </span>
+                                    </div>
+                                  ) : (
+                                    <span className="text-muted-foreground">
+                                      -
+                                    </span>
+                                  )}
+                                </TableCell>
+                                <TableCell className="text-xs">
+                                  <div className="flex flex-col gap-1.5 w-max">
+                                    {(shift.sadtFileUrls || (shift.sadtFileUrl ? [shift.sadtFileUrl] : [])).map((url, i, arr) => (
+                                      <Button 
+                                        key={`sadt-${i}`}
+                                        variant="outline" 
+                                        size="sm" 
+                                        className="h-7 px-2 border-primary/30 text-primary hover:bg-primary/5 font-bold"
+                                        asChild
+                                      >
+                                        <a
+                                          href={url}
+                                          target="_blank"
+                                          rel="noreferrer"
+                                          onClick={(e) => openFile(e, url)}
+                                        >
+                                          <FileText className="h-3 w-3 mr-1" />
+                                          SADT {arr.length > 1 ? i + 1 : ''}
+                                          <Eye className="h-3 w-3 ml-1 opacity-50" />
+                                        </a>
+                                      </Button>
+                                    ))}
+                                    {(shift.nfsFileUrls || (shift.nfsFileUrl ? [shift.nfsFileUrl] : [])).map((url, i, arr) => (
+                                      <Button 
+                                        key={`nfs-${i}`}
+                                        variant="outline" 
+                                        size="sm" 
+                                        className="h-7 px-2 border-primary/30 text-primary hover:bg-primary/5 font-bold"
+                                        asChild
+                                      >
+                                        <a
+                                          href={url}
+                                          target="_blank"
+                                          rel="noreferrer"
+                                          onClick={(e) => openFile(e, url)}
+                                        >
+                                          <FileText className="h-3 w-3 mr-1" />
+                                          NFS-e {arr.length > 1 ? i + 1 : ''}
+                                          <Eye className="h-3 w-3 ml-1 opacity-50" />
+                                        </a>
+                                      </Button>
+                                    ))}
+                                    {!shift.sadtFileUrl && !shift.sadtFileUrls?.length &&
+                                      !shift.nfsFileUrl && !shift.nfsFileUrls?.length && (
+                                        <span className="text-muted-foreground opacity-50 italic">
+                                          Nenhum anexo
+                                        </span>
+                                      )}
+                                  </div>
+                                </TableCell>
+                                <TableCell className="font-bold text-primary">
+                                  {formatCurrency(shift.totalValue)}
+                                </TableCell>
+                                <TableCell>
+                                  <div className="flex items-center gap-2">
+                                    {shift.isConfirmed ? (
+                                      <Badge className="bg-green-500 hover:bg-green-600 flex gap-1 items-center px-2 py-0">
+                                        <CheckCircle2 className="h-3 w-3" />{" "}
+                                        Confirmado
+                                      </Badge>
+                                    ) : (
+                                      <Badge
+                                        variant="outline"
+                                        className="text-amber-500 border-amber-500 flex gap-1 items-center px-2 py-0"
+                                      >
+                                        <Clock className="h-3 w-3" /> Pendente
+                                      </Badge>
+                                    )}
+                                    {isAdmin && (
+                                      <Button
+                                        variant="ghost"
+                                        size="icon"
+                                        className="h-7 w-7 text-primary hover:bg-primary/10"
+                                        onClick={() =>
+                                          handleToggleConfirm(shift)
+                                        }
+                                        disabled={confirmingId === shift.id}
+                                        title={
+                                          shift.isConfirmed
+                                            ? "Remover Confirmação"
+                                            : "Confirmar Lançamento"
+                                        }
+                                      >
+                                        {confirmingId === shift.id ? (
+                                          <Loader2 className="h-3 w-3 animate-spin" />
+                                        ) : (
+                                          <ShieldCheck className="h-4 w-4" />
+                                        )}
+                                      </Button>
+                                    )}
+                                  </div>
+                                </TableCell>
+                                <TableCell className="text-right">
+                                  <div className="flex justify-end gap-1">
+                                    <Button
+                                      variant="ghost"
+                                      size="icon"
+                                      onClick={() => setViewingPatient(shift)}
+                                      className="h-8 w-8 text-primary hover:bg-primary/10"
+                                      title="Ver Detalhes do Paciente"
+                                    >
+                                      <UserIcon className="h-4 w-4" />
+                                    </Button>
+                                    <Button
+                                      variant="ghost"
+                                      size="icon"
+                                      onClick={() => setEditingShift(shift)}
+                                      className="h-8 w-8 text-primary hover:bg-primary/10"
+                                      title={
+                                        shift.isConfirmed && !isAdmin
+                                          ? "Visualizar Lançamento"
+                                          : "Editar Lançamento"
+                                      }
+                                    >
+                                      <Edit2 className="h-4 w-4" />
+                                    </Button>
+                                    {isAdmin && (
+                                      <Button
+                                        variant="ghost"
+                                        size="icon"
+                                        onClick={() => handleDeleteShift(shift)}
+                                        className="h-8 w-8 text-destructive hover:bg-destructive/10"
+                                        title="Excluir Lançamento"
+                                      >
+                                        <Trash2 className="h-4 w-4" />
+                                      </Button>
+                                    )}
+                                  </div>
+                                </TableCell>
+                              </TableRow>
+                            ))}
+                          </TableBody>
+                        </Table>
+                      </div>
+                    </Card>
+                  ))}
+              </CardContent>
+            )}
+          </Card>
+        ))}
 
       {/* Patient Details Dialog */}
-      <Dialog open={!!viewingPatient} onOpenChange={(open) => !open && setViewingPatient(null)}>
-        <DialogContent className="sm:max-w-[90vw] lg:max-w-[80vw] max-h-[90vh] overflow-y-auto">
-          <DialogHeader className="border-b border-primary/10 pb-4">
+      <Dialog
+        open={!!viewingPatient}
+        onOpenChange={(open) => !open && setViewingPatient(null)}
+      >
+        <DialogContent className="sm:max-w-[90vw] lg:max-w-[80vw] max-h-[90vh] overflow-y-auto block p-6">
+          <DialogHeader className="border-b border-primary/10 pb-4 mb-4">
             <DialogTitle className="text-primary flex items-center gap-2 text-2xl font-bold">
               <div className="bg-primary/10 p-2 rounded-full">
                 <UserIcon className="h-6 w-6" />
@@ -471,46 +810,71 @@ export function ShiftList({ shifts, isAdmin: propIsAdmin }: ShiftListProps) {
               Dados do Paciente e Responsável
             </DialogTitle>
             <DialogDescription className="text-base">
-              Informações cadastrais completas do paciente e contato direto do responsável.
+              Informações cadastrais completas do paciente e contato direto do
+              responsável.
             </DialogDescription>
           </DialogHeader>
           {viewingPatient && (
-            <div className="space-y-8 py-6">
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
-                <div className="space-y-6 bg-primary/5 p-6 rounded-xl border border-primary/10">
+            <div className="space-y-8">
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+                <div className="space-y-6 bg-primary/5 p-6 rounded-xl border border-primary/10 h-full">
                   <h4 className="font-bold text-primary flex items-center gap-2 text-lg">
                     <div className="w-1 h-6 bg-primary rounded-full" />
                     Informações do Paciente
                   </h4>
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
                     <div className="space-y-1">
-                      <span className="text-xs text-muted-foreground uppercase font-black tracking-wider">Nome Completo</span>
-                      <p className="font-bold text-xl text-foreground break-words">{viewingPatient.patientName}</p>
-                    </div>
-                    <div className="space-y-1">
-                      <span className="text-xs text-muted-foreground uppercase font-black tracking-wider">Convênio Médico</span>
-                      <p className="font-bold text-xl text-foreground">{viewingPatient.healthInsurance}</p>
-                    </div>
-                    <div className="space-y-1">
-                      <span className="text-xs text-muted-foreground uppercase font-black tracking-wider">Data de Nascimento</span>
-                      <p className="font-bold text-lg flex items-center gap-2">
-                        <Calendar className="h-4 w-4 text-primary" /> 
-                        {viewingPatient.patientDob ? (
-                          typeof viewingPatient.patientDob === 'string' 
-                            ? new Date(viewingPatient.patientDob).toLocaleDateString('pt-BR')
-                            : (viewingPatient.patientDob as any).toDate 
-                              ? (viewingPatient.patientDob as any).toDate().toLocaleDateString('pt-BR')
-                              : new Date(viewingPatient.patientDob).toLocaleDateString('pt-BR')
-                        ) : 'Não informada'}
+                      <span className="text-xs text-muted-foreground uppercase font-black tracking-wider">
+                        Nome Completo
+                      </span>
+                      <p className="font-bold text-xl text-foreground break-words">
+                        {viewingPatient.patientName}
                       </p>
                     </div>
                     <div className="space-y-1">
-                      <span className="text-xs text-muted-foreground uppercase font-black tracking-wider">Gênero</span>
-                      <p className="font-bold text-lg">{viewingPatient.patientGender === 'M' ? 'Masculino' : viewingPatient.patientGender === 'F' ? 'Feminino' : 'Outro'}</p>
+                      <span className="text-xs text-muted-foreground uppercase font-black tracking-wider">
+                        Convênio Médico
+                      </span>
+                      <p className="font-bold text-xl text-foreground">
+                        {viewingPatient.healthInsurance}
+                      </p>
+                    </div>
+                    <div className="space-y-1">
+                      <span className="text-xs text-muted-foreground uppercase font-black tracking-wider">
+                        Data de Nascimento
+                      </span>
+                      <p className="font-bold text-lg flex items-center gap-2">
+                        <Calendar className="h-4 w-4 text-primary" />
+                        {viewingPatient.patientDob
+                          ? typeof viewingPatient.patientDob === "string"
+                            ? new Date(
+                                viewingPatient.patientDob,
+                              ).toLocaleDateString("pt-BR")
+                            : (viewingPatient.patientDob as any).toDate
+                              ? (viewingPatient.patientDob as any)
+                                  .toDate()
+                                  .toLocaleDateString("pt-BR")
+                              : new Date(
+                                  viewingPatient.patientDob,
+                                ).toLocaleDateString("pt-BR")
+                          : "Não informada"}
+                      </p>
+                    </div>
+                    <div className="space-y-1">
+                      <span className="text-xs text-muted-foreground uppercase font-black tracking-wider">
+                        Gênero
+                      </span>
+                      <p className="font-bold text-lg">
+                        {viewingPatient.patientGender === "M"
+                          ? "Masculino"
+                          : viewingPatient.patientGender === "F"
+                            ? "Feminino"
+                            : "Outro"}
+                      </p>
                     </div>
                   </div>
                 </div>
-                
+
                 <div className="space-y-6 bg-secondary/50 p-6 rounded-xl border border-secondary-foreground/10">
                   <h4 className="font-bold text-secondary-foreground flex items-center gap-2 text-lg">
                     <div className="w-1 h-6 bg-secondary-foreground rounded-full" />
@@ -518,22 +882,33 @@ export function ShiftList({ shifts, isAdmin: propIsAdmin }: ShiftListProps) {
                   </h4>
                   <div className="space-y-6">
                     <div className="space-y-1">
-                      <span className="text-xs text-muted-foreground uppercase font-black tracking-wider">Nome do Responsável</span>
-                      <p className="font-bold text-xl text-foreground break-words">{viewingPatient.patientResponsible}</p>
+                      <span className="text-xs text-muted-foreground uppercase font-black tracking-wider">
+                        Nome do Responsável
+                      </span>
+                      <p className="font-bold text-xl text-foreground break-words">
+                        {viewingPatient.patientResponsible}
+                      </p>
                     </div>
                     <div className="space-y-1">
-                      <span className="text-xs text-muted-foreground uppercase font-black tracking-wider">Telefone de Contato</span>
+                      <span className="text-xs text-muted-foreground uppercase font-black tracking-wider">
+                        Telefone de Contato
+                      </span>
                       <div className="flex items-center gap-3">
                         <p className="font-bold text-2xl text-primary">
-                          {viewingPatient.responsiblePhone ? maskPhone(viewingPatient.responsiblePhone) : 'Não informado'}
+                          {viewingPatient.responsiblePhone
+                            ? maskPhone(viewingPatient.responsiblePhone)
+                            : "Não informado"}
                         </p>
                         {viewingPatient.responsiblePhone && (
-                          <Button 
-                            size="sm" 
+                          <Button
+                            size="sm"
                             className="bg-[#25D366] hover:bg-[#128C7E] text-white gap-2"
-                            onClick={() => openWhatsApp(viewingPatient.responsiblePhone)}
+                            onClick={() =>
+                              openWhatsApp(viewingPatient.responsiblePhone)
+                            }
                           >
-                            <MessageCircle className="h-4 w-4 fill-current" /> WhatsApp
+                            <MessageCircle className="h-4 w-4 fill-current" />{" "}
+                            WhatsApp
                           </Button>
                         )}
                       </div>
@@ -547,37 +922,54 @@ export function ShiftList({ shifts, isAdmin: propIsAdmin }: ShiftListProps) {
       </Dialog>
 
       {/* Technician Details Dialog */}
-      <Dialog open={!!viewingTech} onOpenChange={(open) => !open && setViewingTech(null)}>
-        <DialogContent className="sm:max-w-[90vw] lg:max-w-[85vw] max-h-[90vh] overflow-y-auto">
-          <DialogHeader className="border-b border-primary/10 pb-4">
+      <Dialog
+        open={!!viewingTech}
+        onOpenChange={(open) => !open && setViewingTech(null)}
+      >
+        <DialogContent className="sm:max-w-[95vw] lg:max-w-[90vw] max-h-[95vh] overflow-y-auto block p-6">
+          <DialogHeader className="border-b border-primary/10 pb-4 mb-4">
             <DialogTitle className="text-primary flex items-center gap-2 text-2xl font-bold">
               <div className="bg-primary/10 p-2 rounded-full">
                 <ShieldCheck className="h-6 w-6" />
               </div>
-              Atendimentos do Técnico(a) - {viewingTech && formatMonth(viewingTech.month)}
+              Atendimentos do Profissional -{" "}
+              {viewingTech && formatMonth(viewingTech.month)}
             </DialogTitle>
             <DialogDescription className="text-base">
-              Dados do profissional e detalhamento dos pacientes atendidos na competência selecionada.
+              Dados do profissional e detalhamento dos pacientes atendidos na
+              competência selecionada.
             </DialogDescription>
           </DialogHeader>
           {viewingTech && techInfo && (
-            <div className="space-y-8 py-6">
-              <div className="grid grid-cols-1 md:grid-cols-4 gap-6 bg-primary/5 p-6 rounded-xl border border-primary/10 items-end">
+            <div className="space-y-8">
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 bg-primary/5 p-6 rounded-xl border border-primary/10 items-end">
                 <div className="space-y-1">
-                  <span className="text-xs text-muted-foreground uppercase font-black tracking-wider">Nome do Técnico(a)</span>
-                  <p className="font-bold text-xl text-primary">{techInfo.techName}</p>
+                  <span className="text-xs text-muted-foreground uppercase font-black tracking-wider">
+                    Nome do Profissional
+                  </span>
+                  <p className="font-bold text-xl text-primary">
+                    {techInfo.techName}
+                  </p>
                 </div>
                 <div className="space-y-1">
-                  <span className="text-xs text-muted-foreground uppercase font-black tracking-wider">Registro COREN</span>
+                  <span className="text-xs text-muted-foreground uppercase font-black tracking-wider">
+                    Registro COREN
+                  </span>
                   <p className="font-bold text-xl">{techInfo.techCoren}</p>
                 </div>
                 <div className="space-y-1">
-                  <span className="text-xs text-muted-foreground uppercase font-black tracking-wider">WhatsApp de Contato</span>
+                  <span className="text-xs text-muted-foreground uppercase font-black tracking-wider">
+                    WhatsApp de Contato
+                  </span>
                   <div className="flex items-center gap-3">
-                    <p className="font-bold text-xl">{techInfo.techWhatsapp ? maskPhone(techInfo.techWhatsapp) : 'Não informado'}</p>
+                    <p className="font-bold text-xl">
+                      {techInfo.techWhatsapp
+                        ? maskPhone(techInfo.techWhatsapp)
+                        : "Não informado"}
+                    </p>
                     {techInfo.techWhatsapp && (
-                      <Button 
-                        size="sm" 
+                      <Button
+                        size="sm"
                         className="h-8 bg-[#25D366] hover:bg-[#128C7E] text-white p-2"
                         onClick={() => openWhatsApp(techInfo.techWhatsapp)}
                       >
@@ -588,26 +980,35 @@ export function ShiftList({ shifts, isAdmin: propIsAdmin }: ShiftListProps) {
                 </div>
                 {isAdmin && (
                   <div className="bg-background p-4 rounded-lg border border-primary/20 space-y-3">
-                    <p className="text-[10px] font-black uppercase text-primary">Ações em Massa (Gestor)</p>
+                    <p className="text-[10px] font-black uppercase text-primary">
+                      Ações em Massa (Gestor)
+                    </p>
                     <div className="flex gap-2">
                       <div className="flex-1">
-                        <Input 
-                          placeholder="Nº NFS-e p/ todos" 
+                        <Input
+                          placeholder="Nº NFS-e p/ todos"
                           value={bulkNfs}
                           onChange={(e) => setBulkNfs(e.target.value)}
                           className="h-9 text-xs"
                         />
                       </div>
-                      <Button 
-                        size="sm" 
+                      <Button
+                        size="sm"
                         onClick={handleBulkUpdate}
                         disabled={updatingBulk}
                         className="bg-green-600 hover:bg-green-700 text-white font-bold text-xs h-9"
                       >
-                        {updatingBulk ? <Loader2 className="h-4 w-4 animate-spin" /> : 'Confirmar Tudo'}
+                        {updatingBulk ? (
+                          <Loader2 className="h-4 w-4 animate-spin" />
+                        ) : (
+                          "Confirmar Tudo"
+                        )}
                       </Button>
                     </div>
-                    <p className="text-[9px] text-muted-foreground italic">Isso confirmará todos os {techShifts.length} lançamentos abaixo.</p>
+                    <p className="text-[9px] text-muted-foreground italic">
+                      Isso confirmará todos os {techShifts.length} lançamentos
+                      abaixo.
+                    </p>
                   </div>
                 )}
               </div>
@@ -619,33 +1020,108 @@ export function ShiftList({ shifts, isAdmin: propIsAdmin }: ShiftListProps) {
                   </div>
                   Pacientes Atendidos em {formatMonth(viewingTech.month)}
                 </h4>
-                <div className="border border-primary/10 rounded-xl overflow-x-auto shadow-sm">
+                <div className="border border-primary/10 rounded-xl overflow-hidden shadow-sm">
                   <Table>
                     <TableHeader className="bg-muted/50">
                       <TableRow className="border-primary/10">
                         <TableHead className="font-bold">Competência</TableHead>
                         <TableHead className="font-bold">Paciente</TableHead>
-                        {isAdmin && <TableHead className="font-bold">NFS-e</TableHead>}
-                        <TableHead className="font-bold">Plantões</TableHead>
-                        <TableHead className="font-bold">Valor Total</TableHead>
-                        <TableHead className="font-bold">Banco</TableHead>
+                        {isAdmin && (
+                          <TableHead className="font-bold">NFS-e</TableHead>
+                        )}
+                        <TableHead className="font-bold text-center">
+                          Plantões
+                        </TableHead>
+                        <TableHead className="font-bold">Anexos</TableHead>
+                        <TableHead className="font-bold text-right">
+                          V. Unitário
+                        </TableHead>
+                        <TableHead className="font-bold text-right">
+                          Valor Total
+                        </TableHead>
+                        <TableHead className="font-bold text-center">
+                          Banco
+                        </TableHead>
                       </TableRow>
                     </TableHeader>
                     <TableBody>
-                      {techShifts.map(s => (
-                        <TableRow key={s.id} className="border-primary/10 hover:bg-primary/5">
-                          <TableCell className="font-bold text-primary">{formatMonth(s.competence)}</TableCell>
-                          <TableCell className="font-medium">{s.patientName}</TableCell>
+                      {techShifts.map((s) => (
+                        <TableRow
+                          key={s.id}
+                          className="border-primary/10 hover:bg-primary/5"
+                        >
+                          <TableCell className="font-bold text-primary">
+                            {formatMonth(s.competence)}
+                          </TableCell>
+                          <TableCell className="font-medium">
+                            {s.patientName}
+                          </TableCell>
                           {isAdmin && <TableCell>{s.nfsNumber}</TableCell>}
-                          <TableCell className="font-medium">{s.shiftCount}</TableCell>
-                          <TableCell className="font-bold text-primary">{formatCurrency(s.totalValue)}</TableCell>
-                          <TableCell className="text-xs font-medium">
-                            <Badge variant="outline" className="font-normal">{s.bankName}</Badge>
+                          <TableCell className="font-medium text-center">
+                            {s.shiftCount}
+                          </TableCell>
+                          <TableCell className="text-xs">
+                            <div className="flex flex-col gap-1 w-max">
+                              {(s.sadtFileUrls || (s.sadtFileUrl ? [s.sadtFileUrl] : [])).map((url, i, arr) => (
+                                <a
+                                  key={`mob-sadt-${i}`}
+                                  href={url}
+                                  target="_blank"
+                                  rel="noreferrer"
+                                  className="text-primary hover:underline font-bold"
+                                  onClick={(e) => openFile(e, url)}
+                                >
+                                  SADT {arr.length > 1 ? i + 1 : ''}
+                                </a>
+                              ))}
+                              {(s.nfsFileUrls || (s.nfsFileUrl ? [s.nfsFileUrl] : [])).map((url, i, arr) => (
+                                <a
+                                  key={`mob-nfs-${i}`}
+                                  href={url}
+                                  target="_blank"
+                                  rel="noreferrer"
+                                  className="text-primary hover:underline font-bold"
+                                  onClick={(e) => openFile(e, url)}
+                                >
+                                  NFS-e {arr.length > 1 ? i + 1 : ''}
+                                </a>
+                              ))}
+                              {!s.sadtFileUrl && !s.sadtFileUrls?.length && 
+                               !s.nfsFileUrl && !s.nfsFileUrls?.length && (
+                                <span className="text-muted-foreground opacity-50">
+                                  -
+                                </span>
+                              )}
+                            </div>
+                          </TableCell>
+                          <TableCell className="font-medium text-right text-muted-foreground">
+                            {formatCurrency(s.shiftValue)}
+                          </TableCell>
+                          <TableCell className="font-bold text-primary text-right">
+                            {formatCurrency(s.totalValue)}
+                          </TableCell>
+                          <TableCell className="text-xs font-medium text-center">
+                            <Badge variant="outline" className="font-normal">
+                              {s.bankName}
+                            </Badge>
                           </TableCell>
                         </TableRow>
                       ))}
                     </TableBody>
                   </Table>
+                  <div className="bg-primary/10 p-4 border-t border-primary/20 flex justify-between items-center">
+                    <span className="font-bold uppercase text-primary">
+                      Soma Total da Competência:
+                    </span>
+                    <span className="text-2xl font-black text-primary">
+                      {formatCurrency(
+                        techShifts.reduce(
+                          (acc, curr) => acc + curr.totalValue,
+                          0,
+                        ),
+                      )}
+                    </span>
+                  </div>
                 </div>
               </div>
             </div>
@@ -654,13 +1130,16 @@ export function ShiftList({ shifts, isAdmin: propIsAdmin }: ShiftListProps) {
       </Dialog>
 
       {/* Edit Dialog */}
-      <Dialog open={!!editingShift} onOpenChange={(open) => !open && setEditingShift(null)}>
-        <DialogContent className="sm:max-w-[90vw] lg:max-w-[80vw] max-h-[95vh] overflow-y-auto p-0 border-none bg-transparent shadow-none">
+      <Dialog
+        open={!!editingShift}
+        onOpenChange={(open) => !open && setEditingShift(null)}
+      >
+        <DialogContent className="sm:max-w-[95vw] lg:max-w-6xl xl:max-w-[1200px] max-h-[95vh] overflow-y-auto p-0 border-none bg-transparent shadow-none">
           {editingShift && (
-            <ShiftForm 
-              editShift={editingShift} 
-              onSuccess={() => setEditingShift(null)} 
-              onCancel={() => setEditingShift(null)} 
+            <ShiftForm
+              editShift={editingShift}
+              onSuccess={() => setEditingShift(null)}
+              onCancel={() => setEditingShift(null)}
               allShifts={shifts}
             />
           )}
@@ -668,19 +1147,107 @@ export function ShiftList({ shifts, isAdmin: propIsAdmin }: ShiftListProps) {
       </Dialog>
 
       {/* Print Preview Dialog */}
-      <Dialog open={showPrintPreview} onOpenChange={setShowPrintPreview}>
-        <DialogContent className="sm:max-w-[95vw] max-h-[95vh] overflow-y-auto">
-          <DialogHeader className="no-print">
-            <div className="flex justify-between items-center">
+      <Dialog
+        open={showPrintPreview}
+        onOpenChange={(open) => {
+          setShowPrintPreview(open);
+          if (!open) setReportSearchTerm("");
+        }}
+      >
+        <DialogContent className="sm:max-w-[95vw] lg:max-w-6xl xl:max-w-[1200px] max-h-[95vh] overflow-y-auto block p-6">
+          <DialogHeader className="no-print border-b border-primary/10 pb-4 mb-4">
+            <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
               <div>
-                <DialogTitle>Visualização de Impressão</DialogTitle>
+                <DialogTitle className="text-primary text-xl font-bold">
+                  Visualização de Impressão
+                </DialogTitle>
                 <DialogDescription>
-                  Verifique os dados antes de imprimir. O relatório será impresso em formato paisagem.
+                  Verifique os dados antes de imprimir. O relatório será
+                  impresso em formato paisagem.
+                  <br />
+                  <span className="font-bold text-primary mt-1 block">
+                    Atenção: Apenas os lançamentos com status "Confirmado" serão
+                    exibidos e impressos.
+                  </span>
                 </DialogDescription>
               </div>
-              <Button onClick={triggerActualPrint} className="bg-primary hover:bg-primary/90">
-                <Printer className="mr-2 h-4 w-4" /> Confirmar e Imprimir
-              </Button>
+              <div className="flex items-center gap-3 w-full sm:w-auto">
+                <div className="relative flex-1 sm:w-64">
+                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                  <Input
+                    placeholder="Filtrar nesta impressão..."
+                    className="pl-9 h-11 border-primary/30"
+                    value={reportSearchTerm}
+                    onChange={(e) => setReportSearchTerm(e.target.value)}
+                  />
+                </div>
+                <Button
+                  onClick={triggerActualPrint}
+                  className="bg-primary hover:bg-primary/90 h-11 font-bold"
+                >
+                  <Printer className="mr-2 h-4 w-4" /> Imprimir
+                </Button>
+              </div>
+            </div>
+
+            {/* Filtro de Profissionais */}
+            <div className="mt-4 pt-4 border-t border-primary/10">
+              <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2 mb-2">
+                <span className="text-sm font-bold text-slate-700">
+                  Selecionar Profissionais para Impressão ({selectedTechs.length} de {availableTechs.length}):
+                </span>
+                <div className="flex gap-3">
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="h-8 text-xs font-semibold px-3 border-primary text-primary hover:bg-primary/5"
+                    onClick={() => setSelectedTechs(availableTechs)}
+                  >
+                    Selecionar Todos
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="h-8 text-xs font-semibold px-3 text-destructive hover:bg-destructive/10 border-destructive"
+                    onClick={() => setSelectedTechs([])}
+                  >
+                    Desmarcar Todos
+                  </Button>
+                </div>
+              </div>
+              {availableTechs.length === 0 ? (
+                <p className="text-xs text-muted-foreground italic">Nenhum profissional com lançamento confirmado neste mês.</p>
+              ) : (
+                <div className="flex flex-wrap gap-2 max-h-32 overflow-y-auto p-2 border rounded-lg bg-slate-50/50">
+                  {availableTechs.map((techName) => {
+                    const isChecked = selectedTechs.includes(techName);
+                    return (
+                      <label
+                        key={techName}
+                        className={`flex items-center gap-2 px-2.5 py-1.5 rounded-md text-xs font-medium cursor-pointer transition border ${
+                          isChecked
+                            ? "bg-primary text-primary-foreground border-primary shadow-sm"
+                            : "bg-background text-muted-foreground hover:bg-primary/5 hover:text-primary border-slate-200"
+                        }`}
+                      >
+                        <input
+                          type="checkbox"
+                          className="rounded text-primary focus:ring-primary h-3 w-3 accent-primary"
+                          checked={isChecked}
+                          onChange={() => {
+                            if (isChecked) {
+                              setSelectedTechs(selectedTechs.filter((t) => t !== techName));
+                            } else {
+                              setSelectedTechs([...selectedTechs, techName]);
+                            }
+                          }}
+                        />
+                        <span>{techName}</span>
+                      </label>
+                    );
+                  })}
+                </div>
+              )}
             </div>
           </DialogHeader>
 
@@ -689,7 +1256,12 @@ export function ShiftList({ shifts, isAdmin: propIsAdmin }: ShiftListProps) {
               <div className="flex justify-between items-center mb-6 border-b-2 border-primary pb-4">
                 <div className="flex items-center gap-4">
                   {settings.logoUrl ? (
-                    <img src={settings.logoUrl} alt="Logo" className="h-12 w-auto object-contain" referrerPolicy="no-referrer" />
+                    <img
+                      src={settings.logoUrl}
+                      alt="Logo"
+                      className="h-12 w-auto object-contain"
+                      referrerPolicy="no-referrer"
+                    />
                   ) : (
                     <div className="bg-primary p-2 rounded-lg">
                       <ClipboardList className="h-6 w-6 text-primary-foreground" />
@@ -711,79 +1283,190 @@ export function ShiftList({ shifts, isAdmin: propIsAdmin }: ShiftListProps) {
                   </h2>
                 )}
 
-                <h2 className="text-lg font-bold text-gray-600">Relatório de Atendimentos e Pagamentos</h2>
+                <h2 className="text-lg font-bold text-gray-600">
+                  Relatório de Atendimentos e Pagamentos
+                </h2>
               </div>
 
               {Object.values(organizedData)
-                .filter(m => !printingMonth || m.competence === printingMonth)
+                .filter((m) => !printingMonth || m.competence === printingMonth)
                 .sort((a, b) => b.competence.localeCompare(a.competence))
-                .map(monthData => (
-                <div key={monthData.competence} className="mb-6">
-                  <h2 className="text-lg font-bold mb-2 bg-gray-100 p-1.5 rounded">{formatMonth(monthData.competence)}</h2>
-                  {Object.values(monthData.patients)
-                    .sort((a, b) => a.patientName.localeCompare(b.patientName))
-                    .map(patientData => (
-                      <div key={patientData.patientName} className="mb-3 border rounded-lg p-2">
-                        <div className="flex justify-between items-center border-b mb-1.5 pb-0.5">
-                          <h3 className="font-bold">
-                            Paciente: {patientData.patientName}
-                            {patientData.shifts[0]?.patientDob && (
-                              <span className="ml-2 font-normal text-gray-600">
-                                ({calculateAge(patientData.shifts[0].patientDob)} anos)
-                              </span>
-                            )}
-                            {patientData.shifts[0]?.healthInsurance && (
-                              <span className="ml-2 font-bold text-primary">
-                                - {patientData.shifts[0].healthInsurance}
-                              </span>
-                            )}
-                          </h3>
-                          <span className="text-xs font-medium">
-                            Total: {patientData.totalShifts} {patientData.isOverLimit ? '(LIMITE EXCEDIDO)' : ''}
-                          </span>
-                        </div>
-                        <Table>
-                          <TableHeader>
-                            <TableRow className="bg-gray-50">
-                              <TableHead className="h-8 text-xs">Técnico(a)</TableHead>
-                              <TableHead className="h-8 text-xs">Dados Bancários</TableHead>
-                              {isAdmin && <TableHead className="h-8 text-xs">NFS-e</TableHead>}
-                              <TableHead className="h-8 text-xs">Plantões</TableHead>
-                              <TableHead className="h-8 text-xs">Alimentação</TableHead>
-                              <TableHead className="h-8 text-xs">Valor Total</TableHead>
-                              <TableHead className="h-8 text-xs text-center w-10">Pago</TableHead>
-                            </TableRow>
-                          </TableHeader>
-                          <TableBody>
-                            {patientData.shifts.map(shift => (
-                              <TableRow key={shift.id} className="h-8">
-                                <TableCell className="py-1 text-xs">{shift.techName}</TableCell>
-                                <TableCell className="py-1 text-[10px] leading-tight">
-                                  <strong>{shift.bankName}</strong> | <span className="text-xs font-bold text-primary">PIX: {shift.bankPix}</span> | Ag: {shift.bankAgency} | CC: {shift.bankAccount}
-                                </TableCell>
-                                {isAdmin && <TableCell className="py-1 text-xs">{shift.nfsNumber}</TableCell>}
-                                <TableCell className="py-1 text-xs">{shift.shiftCount}</TableCell>
-                                <TableCell className="py-1 text-[10px]">
-                                  {shift.hasMealAllowance ? formatCurrency((shift.mealAllowanceValue || 0) * shift.shiftCount) : '-'}
-                                </TableCell>
-                                <TableCell className="py-1 text-xs font-bold">{formatCurrency(shift.totalValue)}</TableCell>
-                                <TableCell className="py-1 text-center">
-                                  <div className="check-square mx-auto border border-slate-400 w-4 h-4"></div>
-                                </TableCell>
+                .map((monthData) => {
+                  const filteredPatients = Object.values(monthData.patients)
+                    .map((pData) => {
+                      const confirmedShifts = pData.shifts
+                        .filter((s) => s.isConfirmed)
+                        .filter((s) => s.techName && selectedTechs.includes(s.techName));
+                      const totalShiftsCount = confirmedShifts.reduce(
+                        (acc, s) => {
+                          const isRaimundo =
+                            s.patientName ===
+                            "RAIMUNDO RODRIGUES DE LIMA FILHO";
+                          const isTech = isRaimundo
+                            ? s.profession === "Técnico de enfermagem" ||
+                              !s.profession
+                            : true;
+                          return isTech ? acc + s.shiftCount : acc;
+                        },
+                        0,
+                      );
+
+                      return {
+                        ...pData,
+                        shifts: confirmedShifts,
+                        totalShifts: totalShiftsCount,
+                        isOverLimit: totalShiftsCount > pData.limitShifts,
+                      };
+                    })
+                    .filter((pData) => pData.shifts.length > 0)
+                    .filter((pData) => {
+                      const s = reportSearchTerm.toLowerCase();
+                      if (!s) return true;
+                      const patientName = pData.patientName || "";
+                      return (
+                        patientName.toLowerCase().includes(s) ||
+                        pData.shifts.some((sh) =>
+                          (sh.techName || "").toLowerCase().includes(s),
+                        )
+                      );
+                    })
+                    .sort((a, b) => a.patientName.localeCompare(b.patientName));
+
+                  const monthTotalValue = filteredPatients.reduce((acc, p) => {
+                    return (
+                      acc +
+                      p.shifts.reduce(
+                        (pAcc, s) => pAcc + (s.totalValue || 0),
+                        0,
+                      )
+                    );
+                  }, 0);
+
+                  if (filteredPatients.length === 0) return null;
+
+                  return (
+                    <div key={monthData.competence} className="mb-6">
+                      <h2 className="text-lg font-bold mb-2 bg-gray-100 p-1.5 rounded flex justify-between items-center">
+                        <span>{formatMonth(monthData.competence)}</span>
+                        <span className="text-primary">
+                          Total Pago na Competência:{" "}
+                          {formatCurrency(monthTotalValue)}
+                        </span>
+                      </h2>
+                      {filteredPatients.map((patientData) => (
+                        <div
+                          key={patientData.patientName}
+                          className="mb-3 border rounded-lg p-2"
+                        >
+                          <div className="flex justify-between items-center border-b mb-1.5 pb-0.5">
+                            <h3 className="font-bold">
+                              Paciente: {patientData.patientName}
+                              {patientData.shifts[0]?.patientDob && (
+                                <span className="ml-2 font-normal text-gray-600">
+                                  (
+                                  {calculateAge(
+                                    patientData.shifts[0].patientDob,
+                                  )}{" "}
+                                  anos)
+                                </span>
+                              )}
+                              {patientData.shifts[0]?.healthInsurance && (
+                                <span className="ml-2 font-bold text-primary">
+                                  - {patientData.shifts[0].healthInsurance}
+                                </span>
+                              )}
+                            </h3>
+                            <span className="text-xs font-medium">
+                              Total: {patientData.totalShifts}{" "}
+                              {patientData.isOverLimit
+                                ? "(LIMITE EXCEDIDO)"
+                                : ""}
+                            </span>
+                          </div>
+                          <Table>
+                            <TableHeader>
+                              <TableRow className="bg-gray-50">
+                                <TableHead className="h-8 text-xs">
+                                  Profissional
+                                </TableHead>
+                                <TableHead className="h-8 text-xs">
+                                  Dados Bancários
+                                </TableHead>
+                                {isAdmin && (
+                                  <TableHead className="h-8 text-xs">
+                                    NFS-e
+                                  </TableHead>
+                                )}
+                                <TableHead className="h-8 text-xs">
+                                  Plantões
+                                </TableHead>
+                                <TableHead className="h-8 text-xs">
+                                  Alimentação
+                                </TableHead>
+                                <TableHead className="h-8 text-xs">
+                                  Valor Total
+                                </TableHead>
+                                <TableHead className="h-8 text-xs text-center w-10">
+                                  Pago
+                                </TableHead>
                               </TableRow>
-                            ))}
-                          </TableBody>
-                        </Table>
-                      </div>
-                    ))}
-                </div>
-              ))}
+                            </TableHeader>
+                            <TableBody>
+                              {patientData.shifts.map((shift) => (
+                                <TableRow key={shift.id} className="h-8">
+                                  <TableCell className="py-1 text-xs">
+                                    {shift.profession &&
+                                      shift.patientName ===
+                                        "RAIMUNDO RODRIGUES DE LIMA FILHO" && (
+                                        <span className="font-bold block text-[10px] bg-gray-100 px-1 rounded-sm w-max mb-0.5">
+                                          {shift.profession}
+                                        </span>
+                                      )}
+                                    {shift.techName}
+                                  </TableCell>
+                                  <TableCell className="py-1 text-[10px] leading-tight">
+                                    <strong>{shift.bankName}</strong> |{" "}
+                                    <span className="text-xs font-bold text-primary">
+                                      PIX: {shift.bankPix}
+                                    </span>{" "}
+                                    | Ag: {shift.bankAgency} | CC:{" "}
+                                    {shift.bankAccount}
+                                  </TableCell>
+                                  {isAdmin && (
+                                    <TableCell className="py-1 text-xs">
+                                      {shift.nfsNumber}
+                                    </TableCell>
+                                  )}
+                                  <TableCell className="py-1 text-xs">
+                                    {shift.shiftCount}
+                                  </TableCell>
+                                  <TableCell className="py-1 text-[10px]">
+                                    {shift.hasMealAllowance
+                                      ? formatCurrency(
+                                          (shift.mealAllowanceValue || 0) *
+                                            shift.shiftCount,
+                                        )
+                                      : "-"}
+                                  </TableCell>
+                                  <TableCell className="py-1 text-xs font-bold">
+                                    {formatCurrency(shift.totalValue)}
+                                  </TableCell>
+                                  <TableCell className="py-1 text-center">
+                                    <div className="check-square mx-auto border border-slate-400 w-4 h-4"></div>
+                                  </TableCell>
+                                </TableRow>
+                              ))}
+                            </TableBody>
+                          </Table>
+                        </div>
+                      ))}
+                    </div>
+                  );
+                })}
             </div>
           </div>
         </DialogContent>
       </Dialog>
-
     </div>
   );
 }
-

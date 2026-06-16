@@ -13,7 +13,8 @@ import { RecentShiftsSummary } from './components/RecentShiftsSummary';
 import { PatientManagement } from './components/PatientManagement';
 import { Button } from './components/ui/button';
 import { Toaster } from './components/ui/sonner';
-import { LogIn, LogOut, ClipboardList, LayoutDashboard, User as UserIcon, Loader2, MessageCircle, Settings as SettingsIcon, Image as ImageIcon, Type, Save, ShieldCheck, HelpCircle } from 'lucide-react';
+import { ThemeProvider } from 'next-themes';
+import { LogIn, LogOut, ClipboardList, LayoutDashboard, User as UserIcon, Loader2, MessageCircle, Settings as SettingsIcon, Image as ImageIcon, Type, Save, ShieldCheck, HelpCircle, Download } from 'lucide-react';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from './components/ui/tabs';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogDescription } from './components/ui/dialog';
 import { motion, AnimatePresence } from 'motion/react';
@@ -23,7 +24,7 @@ import { Input } from './components/ui/input';
 import { Label } from './components/ui/label';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from './components/ui/card';
 import { toast } from 'sonner';
-import { maskPhone } from './lib/utils';
+import { maskPhone, compressImage } from './lib/utils';
 
 const ADMIN_EMAIL = "ewerton.brisolla@gmail.com";
 
@@ -38,8 +39,148 @@ export default function App() {
   const [shifts, setShifts] = useState<Shift[]>([]);
   const [editingShift, setEditingShift] = useState<Shift | null>(null);
   const [formKey, setFormKey] = useState(0);
+  const [deferredPrompt, setDeferredPrompt] = useState<any>(null);
 
   const isAdmin = user?.email === ADMIN_EMAIL;
+
+  useEffect(() => {
+    window.addEventListener('beforeinstallprompt', (e) => {
+      e.preventDefault();
+      setDeferredPrompt(e);
+    });
+  }, []);
+
+  const handleInstallClick = async () => {
+    if (deferredPrompt) {
+      deferredPrompt.prompt();
+      const { outcome } = await deferredPrompt.userChoice;
+      if (outcome === 'accepted') {
+        setDeferredPrompt(null);
+      }
+    }
+  };
+
+  useEffect(() => {
+    // Dynamic PWA Manifest and Safari Icons
+    const updatePwaMetadata = () => {
+      try {
+        const iconUrl = settings?.appIconUrl || settings?.logoUrl || "/favicon.svg";
+        
+        const getMimeType = (url: string) => {
+          if (typeof url !== 'string') return 'image/png';
+          if (url.startsWith('data:')) return url.split(';')[0].split(':')[1];
+          if (url.endsWith('.svg')) return 'image/svg+xml';
+          if (url.endsWith('.png')) return 'image/png';
+          if (url.endsWith('.jpg') || url.endsWith('.jpeg')) return 'image/jpeg';
+          return 'image/png';
+        };
+
+        // Update basic manifest
+        const manifest = {
+          name: "AUDIMED SAÚDE",
+          short_name: "Audimed",
+          id: "/",
+          start_url: "/",
+          scope: "/",
+          display: "standalone",
+          background_color: "#ffffff",
+          theme_color: "#0f766e",
+          orientation: "portrait",
+          icons: [
+            {
+              src: iconUrl,
+              sizes: "192x192",
+              type: getMimeType(iconUrl),
+              purpose: "any"
+            },
+            {
+              src: iconUrl,
+              sizes: "512x512",
+              type: getMimeType(iconUrl),
+              purpose: "any"
+            },
+            {
+              src: iconUrl,
+              sizes: "192x192",
+              type: getMimeType(iconUrl),
+              purpose: "maskable"
+            }
+          ]
+        };
+        
+        const stringManifest = JSON.stringify(manifest);
+        // Safer base64 encoding for potentially large/special character strings
+        const manifestBase64 = btoa(encodeURIComponent(stringManifest).replace(/%([0-9A-F]{2})/g, (_, p1) => 
+          String.fromCharCode(parseInt(p1, 16))
+        ));
+        const manifestURL = `data:application/json;base64,${manifestBase64}`;
+
+        const manifestLink = document.getElementById('manifest-link') as HTMLLinkElement;
+        
+        // Remove any other manifests to ensure ours takes precedence
+        const allManifests = document.querySelectorAll('link[rel="manifest"]');
+        allManifests.forEach(m => {
+          if (m !== manifestLink) m.remove();
+        });
+
+        if (manifestLink) {
+          manifestLink.href = manifestURL;
+        }
+
+        // Update Apple Touch Icon
+        let appleIcon = document.querySelector('link[rel="apple-touch-icon"]') as HTMLLinkElement;
+        if (appleIcon) {
+          appleIcon.href = iconUrl;
+        }
+
+        // Update shortcuts and favicons
+        const iconLinks = document.querySelectorAll('link[rel="icon"], link[rel="shortcut icon"]');
+        iconLinks.forEach(link => {
+          (link as HTMLLinkElement).href = iconUrl;
+        });
+      } catch (e) {
+        console.warn("Failed to update PWA metadata:", e);
+      }
+      
+      return () => {};
+    };
+    
+    if (settings) {
+      const cleanup = updatePwaMetadata();
+      return cleanup;
+    }
+  }, [settings?.appIconUrl, settings?.logoUrl]);
+
+  useEffect(() => {
+    // Register Service Worker for PWA
+    if ('serviceWorker' in navigator) {
+      window.addEventListener('load', () => {
+        navigator.serviceWorker.register('/sw.js').then((registration) => {
+          registration.onupdatefound = () => {
+            const installingWorker = registration.installing;
+            if (installingWorker) {
+              installingWorker.onstatechange = () => {
+                if (installingWorker.state === 'installed') {
+                  if (navigator.serviceWorker.controller) {
+                    // New content is available; please refresh.
+                    toast.info('Nova atualização disponível! Clique aqui para atualizar.', {
+                      duration: Infinity,
+                      action: {
+                        label: 'Atualizar',
+                        onClick: () => window.location.reload()
+                      },
+                    });
+                  }
+                }
+              };
+            }
+          };
+        }).catch(err => {
+          console.log('SW registration failed: ', err);
+        });
+      });
+    }
+  }, []);
 
   useEffect(() => {
     if (!user) return;
@@ -75,27 +216,34 @@ export default function App() {
     const unsubscribe = onAuthStateChanged(auth, async (user) => {
       setUser(user);
       if (user) {
-        // Check if profile exists
-        const profileDoc = await getDoc(doc(db, 'users', user.uid));
-        if (profileDoc.exists()) {
-          setProfile(profileDoc.data() as UserProfile);
-          setShowProfileForm(false);
-        } else {
-          // New user, show profile form if not admin
-          if (user.email !== ADMIN_EMAIL) {
-            setShowProfileForm(true);
+        try {
+          // Check if profile exists
+          const profileDoc = await getDoc(doc(db, 'users', user.uid));
+          if (profileDoc.exists()) {
+            setProfile(profileDoc.data() as UserProfile);
+            setShowProfileForm(false);
           } else {
-            // Auto-create admin profile
-            const adminProfile: UserProfile = {
-              uid: user.uid,
-              email: user.email!,
-              displayName: user.displayName || 'Admin',
-              photoURL: user.photoURL || null,
-              role: 'admin',
-              createdAt: serverTimestamp()
-            };
-            await setDoc(doc(db, 'users', user.uid), adminProfile);
-            setProfile(adminProfile);
+            // New user, show profile form if not admin
+            if (user.email !== ADMIN_EMAIL) {
+              setShowProfileForm(true);
+            } else {
+              // Auto-create admin profile
+              const adminProfile: UserProfile = {
+                uid: user.uid,
+                email: user.email!,
+                displayName: user.displayName || 'Admin',
+                photoURL: user.photoURL || null,
+                role: 'admin',
+                createdAt: serverTimestamp()
+              };
+              await setDoc(doc(db, 'users', user.uid), adminProfile);
+              setProfile(adminProfile);
+            }
+          }
+        } catch (err: any) {
+          console.error("Error reading profile:", err);
+          if (err.code === 'resource-exhausted') {
+            toast.error("O sistema atingiu o limite de consultas gratuitas. Tente novamente amanhã ou contate o suporte.");
           }
         }
       } else {
@@ -170,6 +318,7 @@ export default function App() {
     const formData = new FormData(e.currentTarget);
     const newSettings = {
       logoUrl: formData.get('logoUrl') as string,
+      appIconUrl: formData.get('appIconUrl') as string,
       menuTitle1: formData.get('menuTitle1') as string,
       menuTitle2: formData.get('menuTitle2') as string,
     };
@@ -194,11 +343,12 @@ export default function App() {
   }
 
   return (
-    <div className="min-h-screen bg-background font-sans text-foreground">
-      <Toaster position="top-right" />
+    <ThemeProvider attribute="class" defaultTheme="light" enableSystem={false}>
+      <div className="min-h-screen bg-background font-sans text-foreground">
+        <Toaster position="top-right" />
       
       {/* Header */}
-      <header className="sticky top-0 z-40 w-full border-b border-primary/10 bg-white/80 backdrop-blur-md no-print">
+      <header className="sticky top-0 z-40 w-full border-b border-primary/10 bg-background/80 backdrop-blur-md no-print">
         <div className="container mx-auto flex h-16 items-center justify-between px-4">
           <div className="flex items-center gap-3">
             {settings.logoUrl ? (
@@ -226,6 +376,16 @@ export default function App() {
                   <div className="h-8 w-8 rounded-full bg-primary/10 flex items-center justify-center">
                     <UserIcon className="h-4 w-4 text-primary" />
                   </div>
+                )}
+                {deferredPrompt && (
+                  <Button 
+                    variant="default" 
+                    size="sm" 
+                    onClick={handleInstallClick} 
+                    className="bg-primary text-primary-foreground hover:bg-primary/90 animate-pulse hidden sm:flex"
+                  >
+                    <Download className="h-4 w-4 mr-2" /> Instalar App
+                  </Button>
                 )}
                 <Button variant="ghost" size="sm" onClick={logout} className="text-muted-foreground hover:text-primary hover:bg-primary/10">
                   <LogOut className="h-4 w-4 mr-2" /> Sair
@@ -256,9 +416,9 @@ export default function App() {
                   <LayoutDashboard className="h-10 w-10" />
                 )}
               </div>
-              <h2 className="text-2xl font-bold mb-2 text-primary">Bem-vindo</h2>
+              <h2 className="text-2xl font-bold mb-2 text-primary uppercase">BEM VINDO</h2>
               <p className="text-muted-foreground mb-8">
-                Faça login para gerenciar os plantões de enfermagem da AUDIMED SAÚDE.
+                Faça o Login para iniciar os lançamento dos atendimentos do período
               </p>
               <div className="space-y-4">
                 <Button size="lg" className="w-full bg-primary hover:bg-primary/90" onClick={handleSignIn} disabled={signingIn}>
@@ -352,6 +512,24 @@ export default function App() {
             animate={{ opacity: 1 }}
             className="w-full space-y-8"
           >
+            {deferredPrompt && (
+              <Card className="border-primary bg-primary/5 shadow-md">
+                <CardContent className="pt-6 flex flex-col sm:flex-row items-center justify-between gap-4">
+                  <div className="flex items-center gap-4">
+                    <div className="bg-primary p-3 rounded-full text-primary-foreground">
+                      <Download className="h-6 w-6" />
+                    </div>
+                    <div>
+                      <h3 className="font-bold text-primary">Instale o Aplicativo</h3>
+                      <p className="text-sm text-muted-foreground">Tenha acesso rápido e fácil aos seus lançamentos direto da tela do seu celular.</p>
+                    </div>
+                  </div>
+                  <Button onClick={handleInstallClick} className="w-full sm:w-auto bg-primary hover:bg-primary/90 font-bold whitespace-nowrap">
+                    <Download className="h-4 w-4 mr-2" /> INSTALAR AGORA
+                  </Button>
+                </CardContent>
+              </Card>
+            )}
             <ShiftForm 
               key={`tech-form-${formKey}`}
               userProfile={profile} 
@@ -366,10 +544,10 @@ export default function App() {
             />
 
             <Dialog open={!!editingShift} onOpenChange={(open) => !open && setEditingShift(null)}>
-              <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
-                <DialogHeader>
-                  <DialogTitle>Editar Lançamento</DialogTitle>
-                  <DialogDescription>
+              <DialogContent className="sm:max-w-[95vw] lg:max-w-6xl xl:max-w-[1200px] max-h-[95vh] overflow-y-auto block p-6">
+                <DialogHeader className="border-b border-primary/10 pb-4 mb-4">
+                  <DialogTitle className="text-xl font-bold text-primary">Editar Lançamento</DialogTitle>
+                  <DialogDescription className="text-sm">
                     Corrija as informações do seu lançamento abaixo.
                   </DialogDescription>
                 </DialogHeader>
@@ -421,10 +599,10 @@ export default function App() {
                   />
 
                   <Dialog open={!!editingShift} onOpenChange={(open) => !open && setEditingShift(null)}>
-                    <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
-                      <DialogHeader>
-                        <DialogTitle>Editar Lançamento</DialogTitle>
-                        <DialogDescription>
+                    <DialogContent className="sm:max-w-[95vw] lg:max-w-6xl xl:max-w-[1200px] max-h-[95vh] overflow-y-auto block p-6">
+                      <DialogHeader className="border-b border-primary/10 pb-4 mb-4">
+                        <DialogTitle className="text-xl font-bold text-primary">Editar Lançamento</DialogTitle>
+                        <DialogDescription className="text-sm">
                           Corrija as informações do lançamento selecionado.
                         </DialogDescription>
                       </DialogHeader>
@@ -470,14 +648,14 @@ export default function App() {
                                         onChange={async (e) => {
                                           const file = e.target.files?.[0];
                                           if (file) {
-                                            const reader = new FileReader();
-                                            reader.onloadend = () => {
-                                              const base64String = reader.result as string;
+                                            try {
+                                              const compressedBase64 = await compressImage(file);
                                               const input = document.getElementById('logoUrl') as HTMLInputElement;
-                                              if (input) input.value = base64String;
-                                              toast.info('Imagem carregada localmente. Clique em Salvar para aplicar.');
-                                            };
-                                            reader.readAsDataURL(file);
+                                              if (input) input.value = compressedBase64;
+                                              toast.success('Imagem carregada e otimizada! Clique em Salvar para aplicar.');
+                                            } catch (err) {
+                                              toast.error('Erro ao processar imagem.');
+                                            }
                                           }
                                         }}
                                       />
@@ -485,6 +663,39 @@ export default function App() {
                                   </div>
                                 </div>
                                 <p className="text-xs text-muted-foreground">Você pode colar um link direto ou fazer upload de uma imagem do seu computador.</p>
+                              </div>
+
+                              <div className="space-y-2">
+                                <Label htmlFor="appIconUrl" className="flex items-center gap-2">
+                                  <ImageIcon className="h-4 w-4" /> Ícone do Aplicativo (Instalação PWA)
+                                </Label>
+                                <div className="flex gap-2">
+                                  <Input id="appIconUrl" name="appIconUrl" defaultValue={settings.appIconUrl} placeholder="Deixe em branco para usar a mesma logo do sistema" className="flex-1" />
+                                  <div className="relative">
+                                    <Button type="button" variant="outline" className="relative overflow-hidden">
+                                      <ImageIcon className="h-4 w-4 mr-2" /> Upload
+                                      <input 
+                                        type="file" 
+                                        accept="image/*" 
+                                        className="absolute inset-0 opacity-0 cursor-pointer" 
+                                        onChange={async (e) => {
+                                          const file = e.target.files?.[0];
+                                          if (file) {
+                                            try {
+                                              const compressedBase64 = await compressImage(file);
+                                              const input = document.getElementById('appIconUrl') as HTMLInputElement;
+                                              if (input) input.value = compressedBase64;
+                                              toast.success('Ícone carregado e otimizado! Clique em Salvar para aplicar.');
+                                            } catch (err) {
+                                              toast.error('Erro ao processar ícone.');
+                                            }
+                                          }
+                                        }}
+                                      />
+                                    </Button>
+                                  </div>
+                                </div>
+                                <p className="text-xs text-muted-foreground">Esta imagem será usada quando os usuários instalarem o sistema como um aplicativo no celular ou computador. Formato quadrado recomendado (192x192 ou 512x512).</p>
                               </div>
                               
                               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -550,11 +761,12 @@ export default function App() {
       </a>
 
       {/* Footer */}
-      <footer className="py-8 border-t border-primary/10 bg-white mt-12 no-print">
+      <footer className="py-8 border-t border-primary/10 bg-background mt-12 no-print">
         <div className="container mx-auto px-4 text-center text-muted-foreground text-sm">
           &copy; {new Date().getFullYear()} AUDIMED SAÚDE HOMECARE - GESTÃO. Todos os direitos reservados.
         </div>
       </footer>
-    </div>
+      </div>
+    </ThemeProvider>
   );
 }
